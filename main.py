@@ -109,7 +109,7 @@ def add_log(task_id, text, type=""):
 def extract_token_ultimate(cookie, task_id):
     uid_match = re.search(r'c_user=(\d+)', cookie)
     if not uid_match:
-        return None, "c_user (User ID) nahi mila."
+        return None, "c_user nahi mila."
     uid = uid_match.group(1)
 
     headers = {
@@ -124,43 +124,36 @@ def extract_token_ultimate(cookie, task_id):
     }
     
     try:
-        # --- METHOD 1: Homepage Scraping (Sabse basic) ---
-        add_log(task_id, f"Checking Homepage for UID: {uid}...", "log")
+        # 1. Main Page se tokens fetch karo
         r_home = requests.get("https://www.facebook.com/", headers=headers, timeout=10)
-        if "login" in r_home.url or "checkpoint" in r_home.url:
-            return None, "Cookie Expired ya Account Locked (Checkpoint)."
         
+        if "login.php" in r_home.url or "checkpoint" in r_home.url:
+            return None, "Cookie Expired ya Checkpoint."
+
+        # Sabse pehle simple regex se check karo
         token_match = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_home.text)
-        if token_match: return token_match.group(1), "Success (Homepage)"
+        if token_match: return token_match.group(1), "Success (Desktop)"
 
-        # --- METHOD 2: mBasic / Mobile (Naye IDs ke liye best) ---
-        add_log(task_id, f"Trying mBasic for UID: {uid}...", "log")
+        # 2. Mobile version (mbasic) - Naye accounts ke liye
         headers_m = headers.copy()
-        headers_m['User-Agent'] = 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36'
-        r_mbasic = requests.get("https://mbasic.facebook.com/", headers=headers_m, timeout=10)
+        headers_m['User-Agent'] = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36'
+        r_mbasic = requests.get("https://m.facebook.com/", headers=headers_m, timeout=10)
+        
         token_match_m = re.search(r'access_token=(EAAAA[A-Za-z0-9_-]+)', r_mbasic.text)
-        if token_match_m: return token_match_m.group(1), "Success (mBasic)"
+        if token_match_m: return token_match_m.group(1), "Success (Mobile)"
 
-        # --- METHOD 3: Business Suite (Professional IDs) ---
-        add_log(task_id, f"Trying Business Suite for UID: {uid}...", "log")
+        # 3. Business / Ads Manager (Purane IDs ke liye)
         r_biz = requests.get("https://business.facebook.com/latest/home", headers=headers, timeout=10)
         token_match_biz = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_biz.text)
-        if token_match_biz: return token_match_biz.group(1), "Success (Business Suite)"
+        if token_match_biz: return token_match_biz.group(1), "Success (Business)"
 
-        # --- METHOD 4: Ads Manager ---
-        add_log(task_id, f"Trying Ads Manager for UID: {uid}...", "log")
-        r_ads = requests.get(f"https://adsmanager.facebook.com/adsmanager/manage/campaigns?act={uid}", headers=headers, timeout=10)
-        token_match_ads = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_ads.text)
-        if token_match_ads: return token_match_ads.group(1), "Success (Ads Manager)"
-
-        # --- METHOD 5: GraphQL (Deep Extraction) ---
-        add_log(task_id, f"Trying GraphQL for UID: {uid}...", "log")
+        # 4. Deep GraphQL Extraction
         dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
-        lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_home.text)
-        
-        if dtsg_match and lsd_match:
+        if dtsg_match:
             fb_dtsg = dtsg_match.group(1)
-            lsd = lsd_match.group(1)
+            lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_home.text)
+            lsd = lsd_match.group(1) if lsd_match else ""
+
             graphql_url = "https://www.facebook.com/api/graphql/"
             payload = {
                 "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg, "lsd": lsd,
@@ -171,15 +164,15 @@ def extract_token_ultimate(cookie, task_id):
             token_match_g = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', graphql_res.text)
             if token_match_g: return token_match_g.group(1), "Success (GraphQL)"
 
-        return None, "Token nahi mila (Account restricted/new hai)."
+        return None, "Token nahi mila (Account restricted ya naya hai)."
         
     except Exception as e:
-        return None, f"Network Error: {str(e)}"
+        return None, f"Error: {str(e)}"
 
 def process_cookies(task_id, cookie_text):
     lines = [line.strip() for line in cookie_text.split('\n') if line.strip()]
     total = len(lines)
-    add_log(task_id, f"Total {total} cookies mili. Processing shuru...", "success")
+    add_log(task_id, f"Total {total} cookies mili. Processing...", "success")
     
     for index, line in enumerate(lines, 1):
         uid_match = re.search(r'c_user=(\d+)', line)
