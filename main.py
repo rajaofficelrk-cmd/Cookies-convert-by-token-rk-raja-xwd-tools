@@ -2,53 +2,45 @@ from flask import Flask, request, render_template_string, jsonify
 import requests, re, threading, uuid, time
 
 app = Flask(__name__)
-tasks = {} # Store logs and tokens for each task
+tasks = {} 
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>RK RAJA TOKEN GENERATE</title>
+    <title>RK RAJ TOKEN GENERATE</title>
     <style>
-        body { background-color: #0d1a2b; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; }
+        body { background-color: #0d1a2b; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; margin: 0;}
         .content { max-width: 900px; margin: 0 auto; background: #1a0d2b; padding: 30px; border-radius: 15px; box-shadow: 0 0 30px #00ff00; margin-top: 20px;}
         
-        /* Header Image Styling */
-        .header-container {
-            text-align: center;
-            margin-bottom: 20px;
-        }
+        .header-container { text-align: center; margin-bottom: 20px; }
         .header-img {
-            max-width: 100%;
-            max-height: 350px;
-            border-radius: 15px;
-            box-shadow: 0 0 20px #ff00ff, 0 0 40px #00ff00; /* Neon Glow */
-            border: 2px solid #ff00ff;
-            object-fit: cover;
+            max-width: 100%; max-height: 300px; border-radius: 15px;
+            box-shadow: 0 0 20px #ff00ff, 0 0 40px #00ff00; 
+            border: 2px solid #ff00ff; object-fit: cover;
         }
 
         h1 { color: #ff00ff; text-align: center; text-shadow: 0 0 20px #ff00ff; margin-top: 10px;}
-        textarea { width: 100%; height: 150px; background: #0d1a2b; color: #ff00ff; border: 1px solid #00ff00; padding: 10px; font-family: monospace; font-size: 1rem; }
+        textarea { width: 100%; height: 120px; background: #0d1a2b; color: #ff00ff; border: 1px solid #00ff00; padding: 10px; font-family: monospace; font-size: 1rem; box-sizing: border-box; }
         .btn { width: 100%; padding: 15px; background: #ff00ff; color: #000; border: none; font-weight: bold; cursor: pointer; margin-top: 10px; font-size: 1.1rem; }
         .btn:hover { background: #ff1493; box-shadow: 0 0 10px #ff1493; }
         
-        #dashboard { margin-top: 30px; border: 1px dashed #00ff00; padding: 20px; background: #000; max-height: 500px; overflow-y: auto; font-size: 0.95rem; }
+        #dashboard { margin-top: 30px; border: 1px dashed #00ff00; padding: 20px; background: #000; max-height: 400px; overflow-y: auto; font-size: 0.95rem; }
         .log { margin-bottom: 8px; }
-        .token-box { color: #00ff00; word-break: break-all; background: #111; padding: 10px; border: 1px solid #00ff00; margin-top: 5px; display: block; border-radius: 5px;}
+        .token-box { color: #00ff00; word-break: break-all; background: #111; padding: 10px; border: 1px solid #00ff00; margin-top: 5px; display: block; border-radius: 5px; font-size: 1.1rem;}
         .error { color: #ff3333; font-weight: bold; }
         .success { color: #00ff00; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="content">
-        <!-- Aapki Image Yahan Lag Gayi Hai -->
         <div class="header-container">
             <img src="https://i.ibb.co/KjtjBDRP/file-00000000f49c821197fdc7fcda40847d.png" alt="RK RAJA" class="header-img">
         </div>
 
-        <h1>RK RAJA TOKEN GENERATE</h1>
-        <p style="color: #ff00ff; text-align: center;">Har line mein ek account ki cookie daalein (Format: <b>c_user=12345; xs=abcde...</b>)</p>
+        <h1>RK RAJ TOKEN GENERATE</h1>
+        <p style="color: #ff00ff; text-align: center; font-size: 0.9rem;">Har line me ek account ki cookie daalein (Format: c_user=...; xs=...; datr=...;)</p>
         
         <form id="extractForm">
             <textarea name="cookies" id="cookiesInput" placeholder="c_user=10001...; xs=xyz...&#10;c_user=10002...; xs=abc..." required></textarea>
@@ -57,7 +49,7 @@ HTML_TEMPLATE = """
 
         <h3 style="color: #00ff00;">[ LIVE DASHBOARD ]</h3>
         <div id="dashboard">
-            <div class="log" style="color: #888;">Waiting for input...</div>
+            <div class="log" style="color: #888;">Waiting for cookies...</div>
         </div>
     </div>
 
@@ -68,7 +60,7 @@ HTML_TEMPLATE = """
             e.preventDefault();
             const cookies = document.getElementById('cookiesInput').value;
             const dashboard = document.getElementById('dashboard');
-            dashboard.innerHTML = '<div class="log" style="color: #ff00ff;">Starting process...</div>';
+            dashboard.innerHTML = '<div class="log" style="color: #ff00ff;">Starting process... Please wait.</div>';
 
             fetch('/start', {
                 method: 'POST',
@@ -86,7 +78,6 @@ HTML_TEMPLATE = """
 
         function pollLogs() {
             if(!currentTaskId) return;
-            
             fetch('/logs/' + currentTaskId)
             .then(res => res.json())
             .then(data => {
@@ -99,11 +90,10 @@ HTML_TEMPLATE = """
                         div.innerHTML = log.text;
                         dashboard.appendChild(div);
                     });
-                    dashboard.scrollTop = dashboard.scrollHeight; // Auto-scroll
+                    dashboard.scrollTop = dashboard.scrollHeight; 
                 }
-                
                 if(data.status === 'running') {
-                    setTimeout(pollLogs, 1000); // Poll every second
+                    setTimeout(pollLogs, 1000);
                 }
             });
         }
@@ -116,30 +106,54 @@ def add_log(task_id, text, type=""):
     if task_id in tasks:
         tasks[task_id]['logs'].append({"text": text, "type": type})
 
-def extract_real_token(cookie):
+def extract_token_advanced(cookie):
+    uid_match = re.search(r'c_user=(\d+)', cookie)
+    if not uid_match:
+        return None, "c_user (User ID) nahi mila."
+    uid = uid_match.group(1)
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Cookie': cookie
+        'Cookie': cookie,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
     }
     
     try:
-        # Method 1: Ads Manager se token nikalna
-        r = requests.get("https://www.facebook.com/adsmanager/manage/campaigns?act=0", headers=headers, timeout=15)
-        if "login" in r.url or "checkpoint" in r.url:
-            return None, "Cookie Expired ya Account Locked hai."
-        
-        # HTML me accessToken search karna
-        token_match = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r.text)
+        # METHOD 1: Try Ads Manager (Fastest & Most Reliable)
+        r_ads = requests.get(f"https://adsmanager.facebook.com/adsmanager/manage/campaigns?act={uid}", headers=headers, timeout=15)
+        if "login" in r_ads.url or "checkpoint" in r_ads.url:
+            return None, "Cookie Expired ya Account Checkpoint me hai."
+            
+        token_match = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_ads.text)
         if token_match:
             return token_match.group(1), "Success (Ads Manager)"
-            
-        # Method 2: Business Suite se token nikalna (Agar ads manager fail ho)
-        r2 = requests.get("https://business.facebook.com/business_asset_management/", headers=headers, timeout=15)
-        token_match2 = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r2.text)
+
+        # METHOD 2: Try Business Suite
+        r_biz = requests.get("https://business.facebook.com/business_asset_management/", headers=headers, timeout=15)
+        token_match2 = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_biz.text)
         if token_match2:
             return token_match2.group(1), "Success (Business Suite)"
-            
-        return None, "Token nahi mila. Facebook ne shayad UI change kar diya hai."
+
+        # METHOD 3: GraphQL (Backup)
+        home_res = requests.get("https://www.facebook.com/", headers=headers, timeout=15)
+        dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', home_res.text)
+        
+        if dtsg_match:
+            fb_dtsg = dtsg_match.group(1)
+            graphql_url = "https://www.facebook.com/api/graphql/"
+            payload = {
+                "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg,
+                "fb_api_req_friendly_name": "CometUserTokenQuery",
+                "variables": "{}", "doc_id": "7116070565914442" 
+            }
+            graphql_res = requests.post(graphql_url, headers=headers, data=payload, timeout=15)
+            token_match3 = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', graphql_res.text)
+            if token_match3:
+                return token_match3.group(1), "Success (GraphQL)"
+
+        return None, "Token nahi mila. Facebook ne API block kar di hai."
+        
     except Exception as e:
         return None, f"Network Error: {str(e)}"
 
@@ -149,13 +163,12 @@ def process_cookies(task_id, cookie_text):
     add_log(task_id, f"Total {total} cookies mili. Process shuru ho raha hai...", "success")
     
     for index, line in enumerate(lines, 1):
-        # Extract UID
         uid_match = re.search(r'c_user=(\d+)', line)
         uid = uid_match.group(1) if uid_match else "Unknown"
         
         add_log(task_id, f"[{index}/{total}] Processing UID: {uid}...")
         
-        token, msg = extract_real_token(line)
+        token, msg = extract_token_advanced(line)
         
         if token:
             add_log(task_id, f"✅ UID {uid} ka Token mil gaya! ({msg})", "success")
@@ -163,9 +176,9 @@ def process_cookies(task_id, cookie_text):
         else:
             add_log(task_id, f"❌ UID {uid} fail: {msg}", "error")
             
-        time.sleep(1.5) # Delay taaki Facebook rate-limit na mare
+        time.sleep(2) # Delay taaki FB block na kare
         
-    add_log(task_id, "✅ Saare cookies process ho gaye!", "success")
+    add_log(task_id, "✅ Processing Complete!", "success")
     tasks[task_id]['status'] = 'completed'
 
 @app.route("/")
@@ -178,12 +191,10 @@ def start():
     if not cookie_text:
         return jsonify({"error": "No cookies provided"}), 400
         
-    task_id = str(uuid.uuid4())
+    task_id = str(uuid.uuid4())[:8]
     tasks[task_id] = {"logs": [], "status": "running"}
     
-    # Background thread me process start karo
     threading.Thread(target=process_cookies, args=(task_id, cookie_text), daemon=True).start()
-    
     return jsonify({"task_id": task_id})
 
 @app.route("/logs/<task_id>")
