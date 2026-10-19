@@ -1,5 +1,7 @@
 from flask import Flask, request, render_template_string, jsonify
-import requests, re, threading, uuid, time
+# YAHAN REQUESTS KI JAGAH CURL_CFFI HAI
+from curl_cffi import requests 
+import re, threading, uuid, time
 
 app = Flask(__name__)
 tasks = {} 
@@ -85,41 +87,27 @@ def extract_token_ultimate(cookie, task_id):
         return None, "c_user nahi mila. Cookie format galat hai."
     uid = uid_match.group(1)
 
-    # Real Browser Headers
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Cookie': cookie,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Ch-Ua': '"Chromium";v="123", "Not:A-Brand";v="8"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1'
-    }
-    
+    # YAHAN CURL_CFFI KA USE HUA HAI (impersonate="chrome")
     try:
-        # Request 1: Homepage Check
-        r_home = requests.get("https://www.facebook.com/", headers=headers, timeout=15)
+        # Request 1: Homepage Check (Impersonating Chrome)
+        r_home = requests.get("https://www.facebook.com/", 
+                              headers={"Cookie": cookie}, 
+                              impersonate="chrome110", 
+                              timeout=15)
         
-        if "login.php" in r_home.url or "checkpoint" in r_home.url or "Login" in r_home.text[:1000]:
-            return None, "Cookie Expired ya Account Checkpoint me hai. Browser me check karo."
+        if "login.php" in r_home.url or "checkpoint" in r_home.url:
+            return None, "Cookie Expired ya Account Checkpoint me hai."
             
         # Method 1: Direct EAAAA regex check
         token_match = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_home.text)
         if token_match: return token_match.group(1), "Success (Homepage)"
 
-        # Method 2: Deep GraphQL (Sabse strong method)
+        # Method 2: Deep GraphQL
         dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
         if dtsg_match:
             fb_dtsg = dtsg_match.group(1)
             lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_home.text)
             lsd = lsd_match.group(1) if lsd_match else ""
-            
-            add_log(task_id, f"GraphQL Tokens found. Trying deep extraction...")
 
             graphql_url = "https://www.facebook.com/api/graphql/"
             payload = {
@@ -127,18 +115,23 @@ def extract_token_ultimate(cookie, task_id):
                 "fb_api_req_friendly_name": "CometUserTokenQuery",
                 "variables": "{}", "doc_id": "7116070565914442" 
             }
-            graphql_res = requests.post(graphql_url, headers=headers, data=payload, timeout=15)
+            graphql_res = requests.post(graphql_url, 
+                                        headers={"Cookie": cookie}, 
+                                        data=payload, 
+                                        impersonate="chrome110", 
+                                        timeout=15)
             token_match_g = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', graphql_res.text)
             if token_match_g: return token_match_g.group(1), "Success (GraphQL)"
 
         # Method 3: mBasic (Mobile)
-        headers_m = headers.copy()
-        headers_m['User-Agent'] = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36'
-        r_mbasic = requests.get("https://m.facebook.com/", headers=headers_m, timeout=15)
+        r_mbasic = requests.get("https://m.facebook.com/", 
+                                headers={"Cookie": cookie}, 
+                                impersonate="chrome110", 
+                                timeout=15)
         token_match_m = re.search(r'access_token=(EAAAA[A-Za-z0-9_-]+)', r_mbasic.text)
         if token_match_m: return token_match_m.group(1), "Success (Mobile)"
 
-        return None, "Token nahi mila. Facebook ne request block kar di hai (Render IP issue)."
+        return None, "Token nahi mila. Account restricted hai ya cookies purani hain."
         
     except Exception as e:
         return None, f"Error: {str(e)}"
