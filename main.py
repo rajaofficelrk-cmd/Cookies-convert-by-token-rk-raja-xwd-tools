@@ -33,9 +33,9 @@ HTML_TEMPLATE = """
             <img src="https://i.ibb.co/KjtjBDRP/file-00000000f49c821197fdc7fcda40847d.png" alt="RK RAJA" class="header-img">
         </div>
         <h1>RK RAJ TOKEN GENERATE</h1>
-        <p style="color: #ff00ff; text-align: center; font-size: 0.9rem;">Har line me ek account ki cookie daalein (Format: c_user=...; xs=...; datr=...; sb=...)</p>
+        <p style="color: #ff00ff; text-align: center; font-size: 0.9rem;">Har line me ek account ki cookie daalein (Format: c_user=...; xs=...; datr=...; sb=...;)</p>
         <form id="extractForm">
-            <textarea name="cookies" id="cookiesInput" required></textarea>
+            <textarea name="cookies" id="cookiesInput" placeholder="c_user=10001...; xs=xyz...; datr=abc...; sb=def..." required></textarea>
             <button class="btn" type="submit">🔥 Start Extraction 🔥</button>
         </form>
         <h3 style="color: #00ff00;">[ LIVE DASHBOARD ]</h3>
@@ -84,33 +84,38 @@ def extract_token_ultimate(cookie, task_id):
     uid_match = re.search(r'c_user=(\d+)', cookie)
     if not uid_match:
         return None, "c_user nahi mila. Cookie format galat hai."
+    
+    # Strict Check: Agar datr aur sb nahi hai, toh token nahi milega
+    if 'datr=' not in cookie or 'sb=' not in cookie:
+        return None, "❌ Invalid Cookie: Aapne adhuri cookies daali hain. 'datr' aur 'sb' zaroori hain."
+
     uid = uid_match.group(1)
 
     try:
-        # Step 1: Check if account is Live (Using curl_cffi)
-        check_url = "https://www.facebook.com/me"
-        r_check = requests.get(check_url, headers={"Cookie": cookie}, impersonate="chrome110", timeout=15, allow_redirects=True)
+        # Step 1: Check Connection and Status
+        r_home = requests.get("https://www.facebook.com/", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15, allow_redirects=True)
         
-        if "login" in r_check.url or "checkpoint" in r_check.url:
-            return None, "❌ Account Login/Checkpoint me hai. Browser me verify karo."
-        
-        # Step 2: Fetch Homepage for Token
-        r_home = requests.get("https://www.facebook.com/", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15)
-        
-        # Simple Regex
+        # Debugging Logs
+        add_log(task_id, f"🔍 Debug: Status Code: {r_home.status_code} | URL: {r_home.url} | Length: {len(r_home.text)}", "log")
+
+        if r_home.status_code == 403:
+            return None, "❌ Facebook ne IP Block kar diya hai (403 Forbidden). Render IP issue."
+        if "login" in r_home.url or "checkpoint" in r_home.url:
+            return None, "❌ Cookie Expired ya Account Checkpoint me hai."
+
+        # Step 2: Simple Regex
         token_match = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', r_home.text)
         if token_match: return token_match.group(1), "Success (Homepage)"
 
-        # Step 3: mBasic Mobile (Sabse zyada success rate)
+        # Step 3: Mobile mBasic Check
         r_mbasic = requests.get("https://m.facebook.com/composer/", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15)
         token_match_m = re.search(r'access_token=(EAAAA[A-Za-z0-9_-]+)', r_mbasic.text)
-        if token_match_m: return token_match_m.group(1), "Success (Mobile Composer)"
+        if token_match_m: return token_match_m.group(1), "Success (Mobile)"
 
-        # Step 4: GraphQL Deep Search
+        # Step 4: GraphQL
         dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
         if dtsg_match:
             fb_dtsg = dtsg_match.group(1)
-            # Sabse naya Doc ID try kar rahe hain
             graphql_url = "https://www.facebook.com/api/graphql/"
             payload = {
                 "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg,
@@ -121,9 +126,9 @@ def extract_token_ultimate(cookie, task_id):
             token_match_g = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_-]+)"', graphql_res.text)
             if token_match_g: return token_match_g.group(1), "Success (GraphQL)"
 
-        # Debug: Agar token nahi mila, toh HTML ka chhota hissa dikhao
-        debug_snippet = r_home.text[:200].replace('\n', ' ')
-        return None, f"Token nahi mila. FB Response: {debug_snippet}..."
+        # Debug Snippet (Agar fail ho)
+        snippet = r_home.text[:150].replace('\n', ' ')
+        return None, f"FB ne block kiya. Snippet: {snippet if snippet else 'Blank Response'}"
         
     except Exception as e:
         return None, f"Error: {str(e)}"
