@@ -49,7 +49,7 @@ HTML_TEMPLATE = """
             e.preventDefault();
             const cookies = document.getElementById('cookiesInput').value;
             const dashboard = document.getElementById('dashboard');
-            dashboard.innerHTML = '<div class="log" style="color: #ff00ff;">Extracting... Please wait.</div>';
+            dashboard.innerHTML = '<div class="log" style="color: #ff00ff;">Extracting... Please wait (GraphQL Method).</div>';
             fetch('/start', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'cookies=' + encodeURIComponent(cookies) })
             .then(res => res.json())
             .then(data => { if(data.task_id) { currentTaskId = data.task_id; pollLogs(); } });
@@ -83,55 +83,67 @@ def add_log(task_id, text, type=""):
 def extract_token_ultimate(cookie, task_id):
     uid_match = re.search(r'c_user=(\d+)', cookie)
     if not uid_match:
-        return None, "Format Error"
+        return None, "c_user nahi mila."
     uid = uid_match.group(1)
 
+    headers = {
+        "Cookie": cookie,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1"
+    }
+
     try:
-        # METHOD 1: Direct Messenger API Bypass (Sabse strong for new IDs)
-        headers = {"Cookie": cookie}
-        r_msg = requests.get("https://www.facebook.com/messages/", headers=headers, impersonate="chrome110", timeout=15)
+        # Step 1: Homepage Fetch (Get fb_dtsg & lsd)
+        r_home = requests.get("https://www.facebook.com/", headers=headers, impersonate="chrome120", timeout=15)
         
-        # Universal Token Regex
-        token_match = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', r_msg.text)
-        if token_match: 
-            return token_match.group(1), "Success (Messenger Bypass)"
+        # Step 2: Extract fb_dtsg and lsd (GraphQL require these)
+        dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
+        lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_home.text)
+        
+        if not dtsg_match:
+            return None, "❌ Facebook ne page block kiya hai (No fb_dtsg)."
 
-        # METHOD 2: GraphQL Bypass with updated Doc IDs
-        dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_msg.text)
-        if dtsg_match:
-            fb_dtsg = dtsg_match.group(1)
-            lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_msg.text)
-            lsd = lsd_match.group(1) if lsd_match else ""
+        fb_dtsg = dtsg_match.group(1)
+        lsd = lsd_match.group(1) if lsd_match else ""
 
-            graphql_url = "https://www.facebook.com/api/graphql/"
-            # Naya Doc ID for Token Generation
-            payload = {
-                "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg, "lsd": lsd,
-                "fb_api_req_friendly_name": "CometUserTokenQuery",
-                "variables": "{}", 
-                "doc_id": "7283399315376191" # Updated Doc ID
-            }
-            graphql_res = requests.post(graphql_url, headers=headers, data=payload, impersonate="chrome110", timeout=15)
-            token_match_g = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', graphql_res.text)
-            if token_match_g: 
-                return token_match_g.group(1), "Success (GraphQL Bypass)"
+        # Step 3: GraphQL POST Request to generate real Token
+        graphql_url = "https://www.facebook.com/api/graphql/"
+        payload = {
+            "av": uid,
+            "__user": uid,
+            "__a": "1",
+            "fb_dtsg": fb_dtsg,
+            "lsd": lsd,
+            "fb_api_req_friendly_name": "CometUserTokenQuery",
+            "variables": "{}",
+            "doc_id": "7283399315376191" # Latest Doc ID
+        }
+        
+        r_graphql = requests.post(graphql_url, headers=headers, data=payload, impersonate="chrome120", timeout=15)
+        
+        # Step 4: Extract EAAAA Token from JSON response
+        token_match = re.search(r'"(EAAAA[A-Za-z0-9_\-]+)"', r_graphql.text)
+        if token_match:
+            return token_match.group(1), "✅ Success (GraphQL Real API)"
+            
+        # Step 5: Agar GraphQL fail ho, toh Business Suite try karo
+        r_biz = requests.get("https://business.facebook.com/latest/home", headers=headers, impersonate="chrome120", timeout=15)
+        token_biz = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_biz.text)
+        if token_biz:
+            return token_biz.group(1), "✅ Success (Business Suite)"
 
-        # METHOD 3: Desktop HTML
-        r_home = requests.get("https://www.facebook.com/", headers=headers, impersonate="chrome110", timeout=15)
-        token_match_h = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_home.text)
-        if token_match_h: 
-            return token_match_h.group(1), "Success (Desktop HTML)"
-
-        # Agar sab fail ho jaye
-        return None, "Token Blocked"
+        return None, "❌ Token nahi mila. Facebook API change ho gayi hai."
         
     except Exception as e:
-        return None, "Connection Error"
+        return None, f"Error: {str(e)}"
 
 def process_cookies(task_id, cookie_text):
     lines = [line.strip() for line in cookie_text.split('\n') if line.strip()]
-    total = len(lines)
-    
     for index, line in enumerate(lines, 1):
         uid_match = re.search(r'c_user=(\d+)', line)
         uid = uid_match.group(1) if uid_match else "Unknown"
@@ -140,11 +152,10 @@ def process_cookies(task_id, cookie_text):
         token, msg = extract_token_ultimate(line, task_id)
         
         if token:
-            add_log(task_id, f"✅ Token Extracted!", "success")
+            add_log(task_id, f"✅ Token mil gaya! ({msg})", "success")
             add_log(task_id, f"{token}", "token-box")
         else:
-            # Agar token na mile toh bhi error nahi dega, bas aise dikhayega
-            add_log(task_id, f"⚠️ UID {uid}: Token nahi mila (Account block/Checkpoint me hai).", "error")
+            add_log(task_id, f"❌ Fail: {msg}", "error")
         time.sleep(1) 
         
     tasks[task_id]['status'] = 'completed'
@@ -156,8 +167,6 @@ def home():
 @app.route("/start", methods=["POST"])
 def start():
     cookie_text = request.form.get("cookies").strip()
-    if not cookie_text:
-        return jsonify({"error": "No cookies provided"}), 400
     task_id = str(uuid.uuid4())[:8]
     tasks[task_id] = {"logs": [], "status": "running"}
     threading.Thread(target=process_cookies, args=(task_id, cookie_text), daemon=True).start()
