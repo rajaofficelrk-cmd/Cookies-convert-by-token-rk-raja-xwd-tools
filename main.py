@@ -49,7 +49,7 @@ HTML_TEMPLATE = """
             e.preventDefault();
             const cookies = document.getElementById('cookiesInput').value;
             const dashboard = document.getElementById('dashboard');
-            dashboard.innerHTML = '<div class="log" style="color: #ff00ff;">Extracting... Please wait (GraphQL Method).</div>';
+            dashboard.innerHTML = '<div class="log" style="color: #ff00ff;">Starting Extraction... Please wait.</div>';
             fetch('/start', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'cookies=' + encodeURIComponent(cookies) })
             .then(res => res.json())
             .then(data => { if(data.task_id) { currentTaskId = data.task_id; pollLogs(); } });
@@ -83,7 +83,7 @@ def add_log(task_id, text, type=""):
 def extract_token_ultimate(cookie, task_id):
     uid_match = re.search(r'c_user=(\d+)', cookie)
     if not uid_match:
-        return None, "c_user nahi mila."
+        return None, "Format Error: c_user nahi mila."
     uid = uid_match.group(1)
 
     headers = {
@@ -91,63 +91,61 @@ def extract_token_ultimate(cookie, task_id):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Upgrade-Insecure-Requests": "1"
     }
 
     try:
-        # Step 1: Homepage Fetch (Get fb_dtsg & lsd)
+        # 1. Check if Cookie is VALID (By checking /me)
+        r_check = requests.get("https://www.facebook.com/me", headers=headers, impersonate="chrome120", timeout=15, allow_redirects=True)
+        
+        if "login" in r_check.url or "checkpoint" in r_check.url:
+            return None, "❌ Cookie Expired ya Account Locked/Checkpoint me hai. Browser me login karke check karo."
+            
+        add_log(task_id, f"✅ Cookie is Valid! (Account Live hai)", "success")
+
+        # 2. Fetch Homepage
         r_home = requests.get("https://www.facebook.com/", headers=headers, impersonate="chrome120", timeout=15)
         
-        # Step 2: Extract fb_dtsg and lsd (GraphQL require these)
-        dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
-        lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_home.text)
-        
+        # 3. Look for Token in HTML (Universal)
+        token_match = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', r_home.text)
+        if token_match: 
+            return token_match.group(1), "Success (Direct HTML)"
+
+        # 4. Extract DTSG & LSD (JS method)
+        dtsg_match = re.search(r'"DTSGInitialData",\[\],\{"token":"(.*?)"', r_home.text)
         if not dtsg_match:
-            return None, "❌ Facebook ne page block kiya hai (No fb_dtsg)."
-
-        fb_dtsg = dtsg_match.group(1)
-        lsd = lsd_match.group(1) if lsd_match else ""
-
-        # Step 3: GraphQL POST Request to generate real Token
-        graphql_url = "https://www.facebook.com/api/graphql/"
-        payload = {
-            "av": uid,
-            "__user": uid,
-            "__a": "1",
-            "fb_dtsg": fb_dtsg,
-            "lsd": lsd,
-            "fb_api_req_friendly_name": "CometUserTokenQuery",
-            "variables": "{}",
-            "doc_id": "7283399315376191" # Latest Doc ID
-        }
-        
-        r_graphql = requests.post(graphql_url, headers=headers, data=payload, impersonate="chrome120", timeout=15)
-        
-        # Step 4: Extract EAAAA Token from JSON response
-        token_match = re.search(r'"(EAAAA[A-Za-z0-9_\-]+)"', r_graphql.text)
-        if token_match:
-            return token_match.group(1), "✅ Success (GraphQL Real API)"
+            dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
             
-        # Step 5: Agar GraphQL fail ho, toh Business Suite try karo
-        r_biz = requests.get("https://business.facebook.com/latest/home", headers=headers, impersonate="chrome120", timeout=15)
-        token_biz = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_biz.text)
-        if token_biz:
-            return token_biz.group(1), "✅ Success (Business Suite)"
+        lsd_match = re.search(r'"LSD",\[\],\{"token":"(.*?)"', r_home.text)
+        
+        if dtsg_match:
+            fb_dtsg = dtsg_match.group(1)
+            lsd = lsd_match.group(1) if lsd_match else ""
+            add_log(task_id, f"DTSG Found. Trying GraphQL API...")
 
-        return None, "❌ Token nahi mila. Facebook API change ho gayi hai."
+            # 5. GraphQL Request
+            graphql_url = "https://www.facebook.com/api/graphql/"
+            payload = {
+                "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg, "lsd": lsd,
+                "fb_api_req_friendly_name": "CometUserTokenQuery",
+                "variables": "{}", "doc_id": "7283399315376191" 
+            }
+            graphql_res = requests.post(graphql_url, headers=headers, data=payload, impersonate="chrome120", timeout=15)
+            
+            token_match_g = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', graphql_res.text)
+            if token_match_g: 
+                return token_match_g.group(1), "Success (GraphQL API)"
+
+        return None, "❌ Token nahi mila. Facebook ne is account ke liye API block kar di hai."
         
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return None, f"System Error: {str(e)}"
 
 def process_cookies(task_id, cookie_text):
     lines = [line.strip() for line in cookie_text.split('\n') if line.strip()]
     for index, line in enumerate(lines, 1):
         uid_match = re.search(r'c_user=(\d+)', line)
         uid = uid_match.group(1) if uid_match else "Unknown"
-        add_log(task_id, f"Processing UID: {uid}...")
+        add_log(task_id, f"--- Processing UID: {uid} ---")
         
         token, msg = extract_token_ultimate(line, task_id)
         
@@ -155,7 +153,7 @@ def process_cookies(task_id, cookie_text):
             add_log(task_id, f"✅ Token mil gaya! ({msg})", "success")
             add_log(task_id, f"{token}", "token-box")
         else:
-            add_log(task_id, f"❌ Fail: {msg}", "error")
+            add_log(task_id, f"❌ {msg}", "error")
         time.sleep(1) 
         
     tasks[task_id]['status'] = 'completed'
