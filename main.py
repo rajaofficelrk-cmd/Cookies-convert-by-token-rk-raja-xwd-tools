@@ -94,48 +94,43 @@ def extract_token_ultimate(cookie, task_id):
     }
 
     try:
-        # 1. Check if Cookie is VALID (By checking /me)
-        r_check = requests.get("https://www.facebook.com/me", headers=headers, impersonate="chrome120", timeout=15, allow_redirects=True)
-        
-        if "login" in r_check.url or "checkpoint" in r_check.url:
-            return None, "❌ Cookie Expired ya Account Locked/Checkpoint me hai. Browser me login karke check karo."
-            
-        add_log(task_id, f"✅ Cookie is Valid! (Account Live hai)", "success")
+        add_log(task_id, f"🔍 UID {uid}: Checking endpoints...")
 
-        # 2. Fetch Homepage
-        r_home = requests.get("https://www.facebook.com/", headers=headers, impersonate="chrome120", timeout=15)
-        
-        # 3. Look for Token in HTML (Universal)
-        token_match = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', r_home.text)
-        if token_match: 
-            return token_match.group(1), "Success (Direct HTML)"
+        # 1. Watch Page (Sabse zyada token leak hota hai yahan)
+        r_watch = requests.get("https://www.facebook.com/watch/", headers=headers, impersonate="chrome120", timeout=15)
+        token_watch = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_watch.text)
+        if token_watch: return token_watch.group(1), "Success (Watch Page)"
 
-        # 4. Extract DTSG & LSD (JS method)
-        dtsg_match = re.search(r'"DTSGInitialData",\[\],\{"token":"(.*?)"', r_home.text)
-        if not dtsg_match:
-            dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
-            
-        lsd_match = re.search(r'"LSD",\[\],\{"token":"(.*?)"', r_home.text)
-        
+        # 2. Messages Page
+        r_msg = requests.get("https://www.facebook.com/messages/", headers=headers, impersonate="chrome120", timeout=15)
+        token_msg = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_msg.text)
+        if token_msg: return token_msg.group(1), "Success (Messenger Page)"
+
+        # 3. Business Suite (Agar account purana hai, toh yahan pakka milega)
+        r_biz = requests.get("https://business.facebook.com/latest/home", headers=headers, impersonate="chrome120", timeout=15)
+        token_biz = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_biz.text)
+        if token_biz: return token_biz.group(1), "Success (Business Suite)"
+
+        # 4. Composer (Mobile mBasic)
+        r_comp = requests.get("https://m.facebook.com/composer/", headers=headers, impersonate="chrome120", timeout=15)
+        token_comp = re.search(r'access_token=(EAAAA[A-Za-z0-9_\-]+)', r_comp.text)
+        if token_comp: return token_comp.group(1), "Success (Mobile Composer)"
+
+        # 5. Direct GraphQL (Naya Doc ID)
+        dtsg_match = re.search(r'"DTSGInitialData",\[\],\{"token":"(.*?)"', r_watch.text)
         if dtsg_match:
             fb_dtsg = dtsg_match.group(1)
-            lsd = lsd_match.group(1) if lsd_match else ""
-            add_log(task_id, f"DTSG Found. Trying GraphQL API...")
-
-            # 5. GraphQL Request
             graphql_url = "https://www.facebook.com/api/graphql/"
             payload = {
-                "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg, "lsd": lsd,
+                "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg,
                 "fb_api_req_friendly_name": "CometUserTokenQuery",
-                "variables": "{}", "doc_id": "7283399315376191" 
+                "variables": "{}", "doc_id": "8490247306714249" # UPDATED DOC ID
             }
             graphql_res = requests.post(graphql_url, headers=headers, data=payload, impersonate="chrome120", timeout=15)
-            
             token_match_g = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', graphql_res.text)
-            if token_match_g: 
-                return token_match_g.group(1), "Success (GraphQL API)"
+            if token_match_g: return token_match_g.group(1), "Success (GraphQL API)"
 
-        return None, "❌ Token nahi mila. Facebook ne is account ke liye API block kar di hai."
+        return None, "Facebook ne saare raste band kar diye hain. Account restricted hai."
         
     except Exception as e:
         return None, f"System Error: {str(e)}"
@@ -145,7 +140,6 @@ def process_cookies(task_id, cookie_text):
     for index, line in enumerate(lines, 1):
         uid_match = re.search(r'c_user=(\d+)', line)
         uid = uid_match.group(1) if uid_match else "Unknown"
-        add_log(task_id, f"--- Processing UID: {uid} ---")
         
         token, msg = extract_token_ultimate(line, task_id)
         
@@ -154,7 +148,7 @@ def process_cookies(task_id, cookie_text):
             add_log(task_id, f"{token}", "token-box")
         else:
             add_log(task_id, f"❌ {msg}", "error")
-        time.sleep(1) 
+        time.sleep(1.5) 
         
     tasks[task_id]['status'] = 'completed'
 
