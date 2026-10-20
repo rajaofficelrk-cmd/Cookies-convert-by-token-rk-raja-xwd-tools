@@ -1,7 +1,7 @@
-
 import os
 import secrets
 import requests
+
 from flask import (
     Flask, request, render_template_string,
     redirect, session
@@ -9,7 +9,9 @@ from flask import (
 from urllib.parse import urlencode
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
+app.secret_key = os.environ.get(
+    "FLASK_SECRET_KEY", secrets.token_hex(32)
+)
 
 APP_ID = os.environ.get("APP_ID", "").strip()
 APP_SECRET = os.environ.get("APP_SECRET", "").strip()
@@ -29,50 +31,98 @@ HTML = """
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RK RAJA TOKEN GENERATE</title>
 <style>
-body{background:#0d1a2b;color:#00ff00;font-family:monospace;
-padding:20px;margin:0}
-.content{max-width:900px;margin:20px auto;background:#1a0d2b;
-padding:25px;border-radius:15px;box-shadow:0 0 25px #00ff00;
-text-align:center}
-.header-img{max-width:100%;max-height:280px;border-radius:15px;
-border:2px solid #ff00ff;object-fit:cover}
-h1,h2{color:#ff00ff}
-.btn{padding:14px 24px;background:#ff00ff;color:#000;
-border-radius:8px;text-decoration:none;display:inline-block;
-font-weight:bold;margin:15px 0}
-.card{background:#080812;border:1px solid #ff00ff;
-padding:18px;margin:18px 0;border-radius:10px;overflow-wrap:anywhere}
-.error{color:#ff7777}
+*{box-sizing:border-box}
+body{
+ background:#0d1a2b;color:#00ff00;
+ font-family:'Courier New',monospace;
+ padding:15px;margin:0
+}
+.content{
+ max-width:800px;margin:20px auto;background:#1a0d2b;
+ padding:25px;border-radius:15px;
+ box-shadow:0 0 25px #00ff00;text-align:center
+}
+.header-img{
+ max-width:100%;max-height:280px;
+ border-radius:15px;border:2px solid #ff00ff;
+ object-fit:cover
+}
+h1,h2{color:#ff00ff;text-shadow:0 0 10px #ff00ff}
+.card{
+ background:#080812;border:1px solid #ff00ff;
+ padding:18px;margin:20px 0;border-radius:10px;
+ overflow-wrap:anywhere
+}
+.btn{
+ padding:14px 22px;background:#ff00ff;color:#000;
+ border-radius:8px;text-decoration:none;
+ display:inline-block;font-weight:bold;margin:12px 0
+}
+.status{color:#00ff00}
+.note{color:#ddd;font-size:14px;line-height:1.6}
 </style>
 </head>
 <body>
 <div class="content">
 <img src="https://i.ibb.co/KjtjBDRP/file-00000000f49c821197fdc7fcda40847d.png"
-class="header-img" alt="RK RAJA">
+ class="header-img" alt="RK RAJA">
+
 <h1>RK RAJA TOKEN GENERATE</h1>
-<p>Official Facebook Login &amp; Page Access</p>
-{% if message %}
-<div class="card">{{ message }}</div>
-{% endif %}
+<p>Facebook Official Login</p>
+
+<div class="card">
+<h2>Website Status</h2>
+<p class="status">{{ status }}</p>
+<p class="note">{{ message }}</p>
+</div>
+
+{% if login_enabled %}
 <a class="btn" href="/login">🔵 Login with Facebook</a>
+{% else %}
+<p class="note">Facebook login abhi configure nahi hai.</p>
+{% endif %}
+
+<p class="note">
+Access tokens aur session cookies ko public page par share mat karo.
+</p>
 </div>
 </body>
 </html>
 """
 
-def show(message="", status=200):
-    return render_template_string(HTML, message=message), status
+def show(status, message, login_enabled=False, code=200):
+    return render_template_string(
+        HTML,
+        status=status,
+        message=message,
+        login_enabled=login_enabled
+    ), code
+
+def oauth_configured():
+    return bool(APP_ID and APP_SECRET and REDIRECT_URI)
 
 @app.get("/")
 def home():
-    return show()
+    if oauth_configured():
+        return show(
+            "READY",
+            "Official Facebook OAuth configuration detected.",
+            True
+        )
+
+    return show(
+        "DEMO MODE",
+        "Website is running. Facebook login needs your own Meta App ID, "
+        "App Secret and matching callback URL."
+    )
 
 @app.get("/login")
 def login():
-    if not APP_ID or not REDIRECT_URI:
+    if not oauth_configured():
         return show(
-            "Configuration missing: set APP_ID and REDIRECT_URI in Render.",
-            500
+            "CONFIGURATION REQUIRED",
+            "Set APP_ID, APP_SECRET and REDIRECT_URI in your deployment environment.",
+            code=503
         )
 
     state = secrets.token_urlsafe(32)
@@ -87,29 +137,44 @@ def login():
     }
 
     return redirect(
-        "https://www.facebook.com/"
-        + GRAPH_VERSION
-        + "/dialog/oauth?"
+        f"https://www.facebook.com/{GRAPH_VERSION}/dialog/oauth?"
         + urlencode(params)
     )
 
 @app.get("/callback")
 def callback():
     if request.args.get("error"):
-        return show("Facebook login cancelled or permission denied.")
+        return show(
+            "LOGIN CANCELLED",
+            "Facebook login was cancelled or permission was denied."
+        )
 
     code = request.args.get("code")
     state = request.args.get("state")
+    saved_state = session.pop("oauth_state", None)
 
     if not code:
-        return show("Authorization code missing.", 400)
+        return show(
+            "LOGIN FAILED",
+            "Authorization code was not returned.",
+            code=400
+        )
 
-    saved_state = session.pop("oauth_state", None)
-    if not saved_state or not secrets.compare_digest(saved_state, state or ""):
-        return show("Invalid login state. Please login again.", 400)
+    if not saved_state or not secrets.compare_digest(
+        saved_state, state or ""
+    ):
+        return show(
+            "LOGIN FAILED",
+            "Invalid login state. Please start again.",
+            code=400
+        )
 
-    if not APP_ID or not APP_SECRET or not REDIRECT_URI:
-        return show("Set APP_ID, APP_SECRET and REDIRECT_URI in Render.", 500)
+    if not oauth_configured():
+        return show(
+            "CONFIGURATION REQUIRED",
+            "Facebook OAuth credentials are not configured.",
+            code=503
+        )
 
     try:
         response = requests.get(
@@ -122,36 +187,53 @@ def callback():
             },
             timeout=20
         )
-        data = response.json()
 
-        if response.status_code != 200 or not data.get("access_token"):
-            # Do not display secrets or raw token responses.
+        data = response.json()
+        token = data.get("access_token")
+
+        if response.status_code != 200 or not token:
             return show(
-                "Token exchange failed. Check Meta app settings, "
-                "redirect URI and permissions.",
-                400
+                "TOKEN EXCHANGE FAILED",
+                "Check your Meta app settings, callback URL and permissions.",
+                code=400
             )
 
-        # Validate the token without exposing it in the webpage.
-        token = data["access_token"]
         check = requests.get(
             f"{GRAPH_URL}/me",
-            params={"fields": "id,name", "access_token": token},
+            params={
+                "fields": "id,name",
+                "access_token": token
+            },
             timeout=20
         )
+
         profile = check.json()
 
         if check.status_code != 200 or not profile.get("id"):
-            return show("Token validation failed. Please try logging in again.", 400)
+            return show(
+                "TOKEN VALIDATION FAILED",
+                "Facebook did not validate the access token.",
+                code=400
+            )
 
+        # Never print or place the token in public HTML.
         return show(
-            "Login successful! Token generated and validated for "
+            "LOGIN SUCCESSFUL",
+            "Facebook OAuth succeeded for "
             + str(profile.get("name", "your account"))
-            + ". Token is not displayed publicly."
+            + ". The token was validated but is not displayed."
         )
 
     except (requests.RequestException, ValueError):
-        return show("Facebook connection error. Please retry.", 502)
+        return show(
+            "CONNECTION ERROR",
+            "Facebook could not be reached. Please try again.",
+            code=502
+        )
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}, 200
 
 if __name__ == "__main__":
     app.run(
