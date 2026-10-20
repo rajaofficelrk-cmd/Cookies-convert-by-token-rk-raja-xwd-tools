@@ -1,5 +1,5 @@
 from flask import Flask, request, render_template_string, jsonify
-from curl_cffi import requests # Real Chrome browser impersonation
+from curl_cffi import requests 
 import re, threading, uuid, time
 
 app = Flask(__name__)
@@ -83,51 +83,41 @@ def add_log(task_id, text, type=""):
 def extract_token_ultimate(cookie, task_id):
     uid_match = re.search(r'c_user=(\d+)', cookie)
     if not uid_match:
-        return None, "c_user nahi mila. Cookie format galat hai."
+        return None, "c_user nahi mila."
     
-    if 'datr=' not in cookie or 'sb=' not in cookie:
-        return None, "❌ Invalid Cookie: 'datr' aur 'sb' zaroori hain. Poori cookie copy karein."
-
     uid = uid_match.group(1)
 
     try:
-        # Step 1: Main Page request (Universal Regex Search)
-        r_home = requests.get("https://www.facebook.com/", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15, allow_redirects=True)
+        # Method 1: Mobile Site (mbasic) - Sabse best naye IDs ke liye
+        headers_m = {"Cookie": cookie}
+        r_mbasic = requests.get("https://mbasic.facebook.com/", headers=headers_m, impersonate="chrome110", timeout=15)
+        token_m = re.search(r'access_token=(EAAAA[A-Za-z0-9_\-]+)', r_mbasic.text)
+        if token_m: return token_m.group(1), "Success (Mobile mBasic)"
+
+        # Method 2: Desktop HTML
+        r_home = requests.get("https://www.facebook.com/", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15)
         
-        if r_home.status_code != 200:
-            return None, f"FB Error: Status {r_home.status_code}"
+        patterns = [
+            r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"',
+            r'"access_token":"(EAAAA[A-Za-z0-9_\-]+)"',
+            r'access_token=(EAAAA[A-Za-z0-9_\-]+)'
+        ]
+        for pattern in patterns:
+            token_h = re.search(pattern, r_home.text)
+            if token_h: return token_h.group(1), "Success (Desktop HTML)"
 
-        # Method 1: Universal Regex (HTML me se koi bhi EAAAA token pakad lega)
-        token_match = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', r_home.text)
-        if token_match: 
-            return token_match.group(1), "Success (HTML Bypass)"
+        # Method 3: Ads Manager
+        r_ads = requests.get(f"https://adsmanager.facebook.com/adsmanager/manage/campaigns?act={uid}", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15)
+        token_ads = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_ads.text)
+        if token_ads: return token_ads.group(1), "Success (Ads Manager)"
 
-        # Method 2: GraphQL Bypass
-        dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', r_home.text)
-        if dtsg_match:
-            fb_dtsg = dtsg_match.group(1)
-            lsd_match = re.search(r'"LSD",\[\],{"token":"(.*?)"', r_home.text)
-            lsd = lsd_match.group(1) if lsd_match else ""
+        # Method 4: Business Suite
+        r_biz = requests.get("https://business.facebook.com/latest/home", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15)
+        token_biz = re.search(r'"accessToken":"(EAAAA[A-Za-z0-9_\-]+)"', r_biz.text)
+        if token_biz: return token_biz.group(1), "Success (Business Suite)"
 
-            graphql_url = "https://www.facebook.com/api/graphql/"
-            payload = {
-                "av": uid, "__user": uid, "__a": "1", "fb_dtsg": fb_dtsg, "lsd": lsd,
-                "fb_api_req_friendly_name": "CometUserTokenQuery",
-                "variables": "{}", "doc_id": "7116070565914442" 
-            }
-            graphql_res = requests.post(graphql_url, headers={"Cookie": cookie}, data=payload, impersonate="chrome110", timeout=15)
-            
-            token_match_g = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', graphql_res.text)
-            if token_match_g: 
-                return token_match_g.group(1), "Success (GraphQL Bypass)"
-
-        # Method 3: mBasic Mobile Check
-        r_mbasic = requests.get("https://m.facebook.com/composer/", headers={"Cookie": cookie}, impersonate="chrome110", timeout=15)
-        token_match_m = re.search(r'(EAAAA[A-Za-z0-9_\-]{50,})', r_mbasic.text)
-        if token_match_m: 
-            return token_match_m.group(1), "Success (Mobile Bypass)"
-
-        return None, "Token nahi mila. Account completely restricted lag raha hai."
+        # Agar sab fail ho jaye
+        return None, "❌ Token nahi mila. Bhai, is ID ko browser me kholo, OTP/Photo verify karo, phir 1-2 din baad try karna."
         
     except Exception as e:
         return None, f"Error: {str(e)}"
